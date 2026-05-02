@@ -1,62 +1,84 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import "./style.css";
 
-const formatUsd = (value) => {
+const usdFull = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 0,
+});
+
+function formatUsd(value) {
+  return `$${usdFull.format(Math.round(Number(value || 0)))}`;
+}
+
+function formatPrice(value) {
   const n = Number(value || 0);
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}M`;
-  if (n >= 1_000) return `$${Math.round(n).toLocaleString("en-US")}`;
-  return `$${n.toFixed(0)}`;
-};
+  if (n === 0) return "0";
+  if (n < 0.0001) return n.toPrecision(6);
+  if (n < 1) return n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  if (n < 100) return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  return n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
 
-const formatFee = (fee) => `${(Number(fee || 0) * 100).toFixed(4).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1")}%`;
+function formatFee(value) {
+  const n = Number(value || 0);
+  if (n === 0) return "0%";
+  const pct = Math.abs(n) < 1 ? n * 100 : n;
+  return `${pct.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}%`;
+}
+
+function formatTime(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("ru-RU");
+  } catch {
+    return "—";
+  }
+}
 
 export default function Home() {
-  const [coins, setCoins] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [updatedAt, setUpdatedAt] = useState("");
-  const [query, setQuery] = useState("");
-  const [onlyZeroFee, setOnlyZeroFee] = useState(false);
-  const [minSize, setMinSize] = useState(0);
-  const [sortKey, setSortKey] = useState("maxPositionUsd");
+  const [search, setSearch] = useState("");
+  const [onlyZero, setOnlyZero] = useState(false);
+  const [sortKey, setSortKey] = useState("maxSizeUsd");
   const [sortDir, setSortDir] = useState("desc");
   const [copied, setCopied] = useState("");
 
-  async function loadData() {
+  async function load() {
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/mexc", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || "MEXC API error");
-      setCoins(json.data || []);
-      setUpdatedAt(json.updatedAt || new Date().toISOString());
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.message || "Ошибка загрузки");
+      setRows(Array.isArray(data.rows) ? data.rows : []);
+      setUpdatedAt(data.updatedAt);
     } catch (e) {
-      setError(e.message || "Failed to load data");
+      setError(e?.message || "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    loadData();
+    load();
   }, []);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return coins
-      .filter((c) => !q || c.symbol.toLowerCase().includes(q))
-      .filter((c) => !onlyZeroFee || c.isZeroFee)
-      .filter((c) => Number(c.maxPositionUsd || 0) >= Number(minSize || 0))
-      .sort((a, b) => {
-        const av = a[sortKey] ?? 0;
-        const bv = b[sortKey] ?? 0;
-        const result = typeof av === "string" ? av.localeCompare(bv) : Number(av) - Number(bv);
-        return sortDir === "asc" ? result : -result;
-      });
-  }, [coins, query, onlyZeroFee, minSize, sortKey, sortDir]);
+    const q = search.trim().toLowerCase();
+    const list = rows
+      .filter((r) => !q || r.symbol.toLowerCase().includes(q))
+      .filter((r) => (onlyZero ? r.isZeroFee : true));
+
+    return [...list].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      const result = typeof av === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return sortDir === "asc" ? result : -result;
+    });
+  }, [rows, search, onlyZero, sortKey, sortDir]);
 
   function setSort(key) {
     if (sortKey === key) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -67,33 +89,43 @@ export default function Home() {
   }
 
   async function copySymbol(symbol) {
-    await navigator.clipboard.writeText(symbol);
-    setCopied(symbol);
-    setTimeout(() => setCopied(""), 900);
+    try {
+      await navigator.clipboard.writeText(symbol);
+      setCopied(symbol);
+      setTimeout(() => setCopied(""), 1200);
+    } catch {
+      setCopied("");
+    }
   }
-
-  const lastUpdate = updatedAt ? new Date(updatedAt).toLocaleString("ru-RU") : "—";
 
   return (
     <main className="page">
-      <section className="hero">
+      <section className="header">
         <div>
-          <div className="eyebrow">MEXC Futures Scanner</div>
-          <h1>Лимиты позиции, плечо и 0 fee</h1>
+          <div className="kicker">MEXC Futures Scanner</div>
+          <h1>Лимиты, плечо и 0 fee</h1>
           <p>
-            Практичный сканер без risk tiers: показывает публичный max size, max leverage, комиссии и цену. Тикер копируется кликом.
+            Сканер показывает общий публичный max size из MEXC Futures API, отдельно max leverage и комиссии. Max size не привязывается к конкретному плечу.
           </p>
-          <span className="updated">Updated: {lastUpdate}</span>
+          <span className="updated">Updated: {formatTime(updatedAt)}</span>
         </div>
-        <button className="refresh" onClick={loadData} disabled={loading}>{loading ? "Обновляю..." : "Обновить"}</button>
+        <button className="refresh" onClick={load} disabled={loading}>
+          {loading ? "Обновляю..." : "Обновить"}
+        </button>
       </section>
 
-      <section className="filters">
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Поиск: BTC, TIA, PEPE..." />
-        <input value={minSize || ""} onChange={(e) => setMinSize(e.target.value)} placeholder="Мин. size $, например 50000" type="number" />
-        <label className="check"><input type="checkbox" checked={onlyZeroFee} onChange={(e) => setOnlyZeroFee(e.target.checked)} /> Только 0 fee</label>
-        <button className={sortKey === "maxPositionUsd" ? "sort active" : "sort"} onClick={() => setSort("maxPositionUsd")}>Max size {sortKey === "maxPositionUsd" ? (sortDir === "desc" ? "↓" : "↑") : ""}</button>
-        <button className={sortKey === "maxLeverage" ? "sort active" : "sort"} onClick={() => setSort("maxLeverage")}>Max leverage {sortKey === "maxLeverage" ? (sortDir === "desc" ? "↓" : "↑") : ""}</button>
+      <section className="toolbar">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: BTC, TIA, PEPE..." />
+        <label className="check">
+          <input type="checkbox" checked={onlyZero} onChange={(e) => setOnlyZero(e.target.checked)} />
+          Только 0 fee
+        </label>
+        <button className={sortKey === "maxSizeUsd" ? "pill active" : "pill"} onClick={() => setSort("maxSizeUsd")}>
+          Max size {sortKey === "maxSizeUsd" ? (sortDir === "desc" ? "↓" : "↑") : ""}
+        </button>
+        <button className={sortKey === "maxLeverage" ? "pill active" : "pill"} onClick={() => setSort("maxLeverage")}>
+          Max leverage {sortKey === "maxLeverage" ? (sortDir === "desc" ? "↓" : "↑") : ""}
+        </button>
       </section>
 
       {error ? <div className="error">{error}</div> : null}
@@ -109,24 +141,33 @@ export default function Home() {
               <th>0 fee</th>
               <th>Maker / Taker</th>
               <th>Price</th>
-              <th>Max contracts</th>
+              <th>Max vol</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => (
-              <tr key={c.symbol}>
-                <td><button className="symbol" onClick={() => copySymbol(c.symbol)} title="Скопировать тикер">{c.symbol}</button></td>
-                <td className="money">{formatUsd(c.maxPositionUsd)}</td>
-                <td>{c.maxLeverage}x</td>
-                <td><span className={c.isZeroFee ? "pill yes" : "pill no"}>{c.isZeroFee ? "YES" : "NO"}</span></td>
-                <td>{formatFee(c.makerFee)} / {formatFee(c.takerFee)}</td>
-                <td>{Number(c.price).toPrecision(7)}</td>
-                <td>{Math.round(c.maxVol).toLocaleString("en-US")}</td>
+            {filtered.map((r) => (
+              <tr key={r.symbol}>
+                <td>
+                  <button className="symbol" onClick={() => copySymbol(r.symbol)} title="Нажми, чтобы скопировать">
+                    {r.symbol}
+                  </button>
+                </td>
+                <td className="money">{formatUsd(r.maxSizeUsd)}</td>
+                <td>{r.maxLeverage ? `${r.maxLeverage}x` : "—"}</td>
+                <td><span className={r.isZeroFee ? "yes" : "no"}>{r.isZeroFee ? "YES" : "NO"}</span></td>
+                <td>{formatFee(r.makerFee)} / {formatFee(r.takerFee)}</td>
+                <td>{formatPrice(r.price)}</td>
+                <td>{usdFull.format(Math.round(Number(r.maxVol || 0)))}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!filtered.length ? <div className="empty">Ничего не найдено</div> : null}
+
+        {!loading && filtered.length === 0 ? <div className="empty">Ничего не найдено</div> : null}
+      </section>
+
+      <section className="note">
+        <b>Важно:</b> Max size — общий лимит из публичного contract/detail. Он не означает, что весь size доступен на максимальном плече. Risk tiers убраны, чтобы сайт не показывал ложную привязку плеча к сайзу.
       </section>
     </main>
   );

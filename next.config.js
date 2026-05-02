@@ -1,1 +1,2 @@
-module.exports = {};
+const nextConfig = {};
+module.exports = nextConfig;

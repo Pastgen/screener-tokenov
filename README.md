@@ -1,3 +1,3 @@
 # MEXC Futures Scanner
 
-Next.js app for MEXC Futures contracts, zero-fee tags and calculated risk tiers.
+Simple scanner: max possible size, max leverage, 0 fee, maker/taker, price, symbol copy.

@@ -1,64 +1,67 @@
 export const dynamic = "force-dynamic";
 
-const MEXC_BASE = "https://contract.mexc.com";
-
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function pickPrice(t) {
-  return num(t?.lastPrice ?? t?.last ?? t?.fairPrice ?? t?.indexPrice ?? t?.bid1 ?? t?.ask1);
+function normalizeFee(v) {
+  const n = num(v, 0);
+  // MEXC can return either percent-like 0 or decimal-like 0.0002.
+  // UI will multiply tiny decimal fees by 100.
+  return n;
 }
 
 export async function GET() {
   try {
-    const [detailRes, tickerRes] = await Promise.all([
-      fetch(`${MEXC_BASE}/api/v1/contract/detail`, { cache: "no-store" }),
-      fetch(`${MEXC_BASE}/api/v1/contract/ticker`, { cache: "no-store" })
+    const [contractsRes, tickersRes] = await Promise.all([
+      fetch("https://contract.mexc.com/api/v1/contract/detail", { cache: "no-store" }),
+      fetch("https://contract.mexc.com/api/v1/contract/ticker", { cache: "no-store" })
     ]);
 
-    const detailJson = await detailRes.json();
-    const tickerJson = await tickerRes.json();
+    const contractsJson = await contractsRes.json();
+    const tickersJson = await tickersRes.json();
 
-    const tickers = Array.isArray(tickerJson.data) ? tickerJson.data : [];
-    const prices = new Map(tickers.map((t) => [t.symbol, pickPrice(t)]));
-    const turnover = new Map(tickers.map((t) => [t.symbol, num(t.amount24 ?? t.turnover24 ?? t.holdVol)]));
+    const tickers = Array.isArray(tickersJson?.data) ? tickersJson.data : [];
+    const prices = Object.fromEntries(
+      tickers.map((t) => [t.symbol, num(t.lastPrice ?? t.last_price ?? t.price, 0)])
+    );
 
-    const contracts = Array.isArray(detailJson.data) ? detailJson.data : [];
+    const contracts = Array.isArray(contractsJson?.data) ? contractsJson.data : [];
 
-    const data = contracts
-      .filter((c) => c?.state === 0 || c?.state === "0" || c?.symbol)
+    const rows = contracts
+      .filter((c) => c && c.symbol && (c.state === 0 || c.state === "0" || c.state === undefined))
       .map((c) => {
-        const symbol = c.symbol;
-        const price = prices.get(symbol) || num(c.price);
+        const price = prices[c.symbol] || num(c.lastPrice ?? c.indexPrice ?? c.fairPrice, 0);
+        const maxVol = num(c.maxVol, 0);
         const contractSize = num(c.contractSize, 1);
-        const maxVol = num(c.maxVol);
-        const maxPositionUsd = maxVol * contractSize * price;
-        const maxLeverage = num(c.maxLeverage);
-        const makerFee = num(c.makerFeeRate);
-        const takerFee = num(c.takerFeeRate);
+
+        // IMPORTANT:
+        // This is the overall public max size from MEXC contract detail.
+        // It is NOT attached to maxLeverage and does NOT claim the max size is available at max leverage.
+        const maxSizeUsd = maxVol * contractSize * price;
+
+        const makerFee = normalizeFee(c.makerFeeRate ?? c.makerFee ?? 0);
+        const takerFee = normalizeFee(c.takerFeeRate ?? c.takerFee ?? 0);
         const isZeroFee = makerFee === 0 && takerFee === 0;
 
         return {
-          symbol,
-          price,
-          contractSize,
+          symbol: c.symbol,
+          maxSizeUsd,
           maxVol,
-          maxPositionUsd,
-          maxLeverage,
+          contractSize,
+          maxLeverage: num(c.maxLeverage, 0),
+          price,
           makerFee,
           takerFee,
           isZeroFee,
-          volume24Usd: turnover.get(symbol) || 0,
-          updatedAt: new Date().toISOString()
+          source: "contract/detail"
         };
       })
-      .filter((c) => c.symbol && c.price > 0)
-      .sort((a, b) => b.maxPositionUsd - a.maxPositionUsd);
+      .sort((a, b) => b.maxSizeUsd - a.maxSizeUsd);
 
-    return Response.json({ success: true, updatedAt: new Date().toISOString(), data });
+    return Response.json({ updatedAt: new Date().toISOString(), rows });
   } catch (error) {
-    return Response.json({ success: false, error: error?.message || "Unknown error" }, { status: 500 });
+    return Response.json({ error: true, message: error?.message || "Failed to fetch MEXC data" }, { status: 500 });
   }
 }
