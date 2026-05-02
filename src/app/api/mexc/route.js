@@ -1,96 +1,88 @@
-export const dynamic = 'force-dynamic';
+const DETAIL_URL = 'https://contract.mexc.com/api/v1/contract/detail';
+const TICKER_URL = 'https://contract.mexc.com/api/v1/contract/ticker';
 
-const API_BASE = 'https://contract.mexc.com/api/v1';
-
-function toNumber(value, fallback = 0) {
+function num(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function getMarketType(coin) {
+function marketType(coin) {
   const symbol = String(coin.symbol || '');
-  const quote = String(coin.quoteCoin || '').toUpperCase();
-  const settle = String(coin.settleCoin || '').toUpperCase();
-  const base = String(coin.baseCoin || '').toUpperCase();
-  const contractType = String(coin.contractType || coin.type || '').toUpperCase();
-
-  if (settle === 'USDT' || quote === 'USDT' || symbol.endsWith('_USDT')) return 'USDT-M';
-  if (settle === 'USDC' || quote === 'USDC' || symbol.endsWith('_USDC')) return 'USDC-M';
-  if (settle === 'USD1' || quote === 'USD1' || symbol.endsWith('_USD1')) return 'USD1-M';
-  if (settle === 'USD' || quote === 'USD' || symbol.endsWith('_USD')) return 'USD-M';
-  if (contractType.includes('INVERSE') || (settle && settle === base)) return 'COIN-M';
-  return settle ? `${settle}-M` : 'OTHER';
+  const settle = String(coin.settleCoin || coin.quoteCoin || '').toUpperCase();
+  if (settle === 'USDT') return 'USDT-M';
+  if (settle === 'USDC') return 'USDC-M';
+  if (settle === 'USD1') return 'USD1-M';
+  if (settle === 'USD') return 'USD-M';
+  if (symbol.endsWith('_USD')) return 'USD-M';
+  return settle ? `${settle}-M` : 'COIN-M';
 }
 
-function getOverallContracts(coin) {
-  const maxVol = toNumber(coin.maxVol);
-  const riskBaseVol = toNumber(coin.riskBaseVol);
-  const riskIncrVol = toNumber(coin.riskIncrVol);
-  const riskLevelLimit = Math.max(1, toNumber(coin.riskLevelLimit, 1));
+function maxContractsOverall(coin) {
+  const maxVol = num(coin.maxVol);
+  const riskBaseVol = num(coin.riskBaseVol);
+  const riskIncrVol = num(coin.riskIncrVol);
+  const riskLevelLimit = num(coin.riskLevelLimit);
 
-  // MEXC public contract fields often expose the overall position cap through risk fields.
-  // We keep it separate from max leverage because this overall cap is NOT necessarily available at max leverage.
-  const riskOverall = riskBaseVol > 0
-    ? riskBaseVol + Math.max(0, riskLevelLimit - 1) * riskIncrVol
-    : 0;
+  // This is the overall max position size derived from MEXC public risk fields.
+  // It is intentionally NOT tied to maxLeverage.
+  if (riskBaseVol > 0 && riskIncrVol > 0 && riskLevelLimit > 0) {
+    return riskBaseVol + riskIncrVol * Math.max(0, riskLevelLimit - 1);
+  }
 
-  return Math.max(maxVol, riskOverall);
-}
+  if (riskBaseVol > 0 && riskIncrVol > 0) {
+    return riskBaseVol + riskIncrVol;
+  }
 
-function formatFee(value) {
-  const n = toNumber(value);
-  return n;
+  if (riskBaseVol > 0) return riskBaseVol;
+  return maxVol;
 }
 
 export async function GET() {
   try {
-    const [contractsRes, tickersRes] = await Promise.all([
-      fetch(`${API_BASE}/contract/detail`, { cache: 'no-store' }),
-      fetch(`${API_BASE}/contract/ticker`, { cache: 'no-store' }),
+    const [detailsRes, tickersRes] = await Promise.all([
+      fetch(DETAIL_URL, { next: { revalidate: 60 } }),
+      fetch(TICKER_URL, { next: { revalidate: 15 } })
     ]);
 
-    if (!contractsRes.ok || !tickersRes.ok) {
-      return Response.json({ error: 'MEXC request failed' }, { status: 502 });
+    if (!detailsRes.ok || !tickersRes.ok) {
+      return Response.json({ error: 'MEXC API request failed' }, { status: 502 });
     }
 
-    const contractsJson = await contractsRes.json();
+    const detailsJson = await detailsRes.json();
     const tickersJson = await tickersRes.json();
-
+    const details = Array.isArray(detailsJson.data) ? detailsJson.data : [];
     const tickers = Array.isArray(tickersJson.data) ? tickersJson.data : [];
-    const prices = Object.fromEntries(tickers.map((t) => [t.symbol, toNumber(t.lastPrice || t.fairPrice || t.indexPrice)]));
 
-    const contracts = Array.isArray(contractsJson.data) ? contractsJson.data : [];
+    const priceBySymbol = new Map(
+      tickers.map((t) => [String(t.symbol), num(t.lastPrice || t.fairPrice || t.indexPrice)])
+    );
 
-    const coins = contracts
+    const result = details
       .filter((coin) => coin && coin.symbol)
       .map((coin) => {
-        const price = prices[coin.symbol] || toNumber(coin.fairPrice || coin.indexPrice || coin.price);
-        const contractSize = toNumber(coin.contractSize, 1);
-        const contractsCap = getOverallContracts(coin);
-        const maxSizeUsd = contractsCap * contractSize * price;
-        const makerFee = formatFee(coin.makerFeeRate);
-        const takerFee = formatFee(coin.takerFeeRate);
-        const marketType = getMarketType(coin);
+        const symbol = String(coin.symbol);
+        const price = priceBySymbol.get(symbol) || num(coin.lastPrice || coin.price);
+        const contractSize = num(coin.contractSize, 1);
+        const contracts = maxContractsOverall(coin);
+        const maxSizeUsd = contracts * contractSize * price;
+        const makerFee = num(coin.makerFeeRate) * 100;
+        const takerFee = num(coin.takerFeeRate) * 100;
 
         return {
-          symbol: coin.symbol,
-          displaySymbol: String(coin.symbol).replace('_', ''),
-          marketType,
-          quoteCoin: coin.quoteCoin || null,
-          settleCoin: coin.settleCoin || null,
+          symbol,
+          market: marketType(coin),
           maxSizeUsd,
-          contracts: contractsCap,
-          maxLeverage: toNumber(coin.maxLeverage),
+          contracts,
+          maxLeverage: num(coin.maxLeverage),
           makerFee,
           takerFee,
-          isZeroFee: makerFee === 0 && takerFee === 0,
+          zeroFee: makerFee === 0 && takerFee === 0,
           price,
         };
       })
-      .filter((coin) => coin.price > 0)
-      .sort((a, b) => b.maxSizeUsd - a.maxSizeUsd);
+      .filter((coin) => coin.price > 0 && coin.maxSizeUsd > 0);
 
-    return Response.json({ updatedAt: new Date().toISOString(), coins });
+    return Response.json({ updatedAt: new Date().toISOString(), data: result });
   } catch (error) {
     return Response.json({ error: error?.message || 'Unknown error' }, { status: 500 });
   }

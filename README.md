@@ -1,3 +1,3 @@
 # MEXC Futures Scanner
 
-Personal scanner for MEXC futures max size, leverage, 0-fee status and compact filters.
+Personal scanner for MEXC futures contracts: max size, leverage, zero-fee, favorites, filters and sorting.

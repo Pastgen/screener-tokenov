@@ -1,6 +1,6 @@
 export const metadata = {
   title: 'MEXC Futures Scanner',
-  description: 'MEXC Futures max size and fee scanner',
+  description: 'MEXC futures max size and zero-fee scanner'
 };
 
 export default function RootLayout({ children }) {

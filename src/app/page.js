@@ -1,242 +1,219 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import "./styles.css";
+import { useEffect, useMemo, useState } from 'react';
+import './globals.css';
 
-const MARKET_TABS = ["ALL", "USDT-M", "USDC-M", "USD1-M", "USD-M", "COIN-M"];
-const SORTABLE = new Set(["symbol", "maxSizeUsd", "contracts", "maxLeverage", "makerTaker", "price", "marketType"]);
+const MARKETS = ['ALL', 'USDT-M', 'USDC-M', 'USD1-M', 'USD-M', 'COIN-M'];
+const FAVORITES_KEY = 'mexc-scanner-favorites-v1';
 
 function formatUsd(value) {
-  return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
+  return `$${Math.round(Number(value || 0)).toLocaleString('en-US')}`;
 }
 
-function formatNumber(value) {
-  const n = Number(value || 0);
-  if (n >= 1_000_000_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  if (n >= 1_000_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  if (n >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
-  return n.toLocaleString("en-US", { maximumFractionDigits: 4 }).replace(/\.0+$/, "");
+function formatNumber(value, maximumFractionDigits = 0) {
+  return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits });
 }
 
 function formatPrice(value) {
   const n = Number(value || 0);
-  if (n >= 100) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
-  return n.toLocaleString("en-US", { maximumSignificantDigits: 8 });
+  if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (n >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  return n.toLocaleString('en-US', { maximumSignificantDigits: 8 });
 }
 
 function formatFee(value) {
-  const n = Number(value || 0) * 100;
-  if (Math.abs(n) < 0.000001) return "0%";
-  return `${n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}%`;
+  const n = Number(value || 0);
+  if (n === 0) return '0%';
+  return `${n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`;
 }
 
-function nextSort(current, key) {
-  if (current.key !== key) return { key, dir: "desc" };
-  if (current.dir === "desc") return { key, dir: "asc" };
-  return { key: "", dir: "none" };
-}
-
-function SortLabel({ label, column, sort, setSort, align = "left" }) {
-  const active = sort.key === column && sort.dir !== "none";
-  const arrow = active ? (sort.dir === "desc" ? "↓" : "↑") : "";
-  return (
-    <button
-      className={`sortHead ${active ? "active" : ""} ${align === "right" ? "right" : ""}`}
-      onClick={() => setSort((s) => nextSort(s, column))}
-      title="Нажми: убывание → возрастание → без сортировки"
-    >
-      <span>{label}</span>
-      <span className="arrow">{arrow}</span>
-    </button>
-  );
+function parseMoneyInput(value) {
+  if (!value) return 0;
+  const cleaned = String(value).replace(/[$,\s]/g, '').toLowerCase();
+  const multiplier = cleaned.endsWith('m') ? 1_000_000 : cleaned.endsWith('k') ? 1_000 : 1;
+  return Number(cleaned.replace(/[mk]$/, '')) * multiplier || 0;
 }
 
 export default function Home() {
   const [coins, setCoins] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [updatedAt, setUpdatedAt] = useState("");
-
-  const [query, setQuery] = useState("");
-  const [market, setMarket] = useState("ALL");
-  const [onlyZeroFee, setOnlyZeroFee] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [market, setMarket] = useState('ALL');
+  const [zeroOnly, setZeroOnly] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [minSize, setMinSize] = useState("");
-  const [minLev, setMinLev] = useState("");
+  const [minSize, setMinSize] = useState('');
+  const [minLeverage, setMinLeverage] = useState('');
   const [favorites, setFavorites] = useState([]);
-  const [copied, setCopied] = useState("");
-  const [sort, setSort] = useState({ key: "maxSizeUsd", dir: "desc" });
+  const [sort, setSort] = useState({ key: 'maxSizeUsd', dir: 'desc' });
+  const [toast, setToast] = useState('');
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]');
+      if (Array.isArray(saved)) setFavorites(saved);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites]);
 
   async function loadData() {
     setLoading(true);
-    setError("");
+    setError('');
     try {
-      const res = await fetch("/api/mexc", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to load data");
-      setCoins(Array.isArray(data.coins) ? data.coins : []);
-      setUpdatedAt(data.updatedAt || new Date().toISOString());
-    } catch (e) {
-      setError(e.message || "Ошибка загрузки");
+      const res = await fetch('/api/mexc', { cache: 'no-store' });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || 'Failed to load data');
+      setCoins(json.data || []);
+      setUpdatedAt(json.updatedAt || new Date().toISOString());
+    } catch (err) {
+      setError(err?.message || 'Ошибка загрузки данных');
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadData();
-    try {
-      const stored = JSON.parse(localStorage.getItem("mexcScannerFavorites") || "[]");
-      if (Array.isArray(stored)) setFavorites(stored);
-    } catch {}
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
-  function saveFavorites(next) {
-    setFavorites(next);
-    localStorage.setItem("mexcScannerFavorites", JSON.stringify(next));
+  function copySymbol(symbol) {
+    navigator.clipboard?.writeText(symbol);
+    setToast(`${symbol} copied`);
+    window.setTimeout(() => setToast(''), 1200);
   }
 
   function toggleFavorite(symbol) {
-    const next = favorites.includes(symbol)
-      ? favorites.filter((s) => s !== symbol)
-      : [...favorites, symbol];
-    saveFavorites(next);
+    setFavorites((prev) => prev.includes(symbol) ? prev.filter((x) => x !== symbol) : [...prev, symbol]);
   }
 
-  async function copySymbol(symbol) {
-    try {
-      await navigator.clipboard.writeText(symbol);
-      setCopied(`${symbol} copied`);
-      setTimeout(() => setCopied(""), 1200);
-    } catch {
-      setCopied("Copy failed");
-      setTimeout(() => setCopied(""), 1200);
-    }
+  function toggleFavoritesOnly() {
+    setFavoritesOnly((value) => !value);
   }
 
-  const marketsAvailable = useMemo(() => {
-    const set = new Set(coins.map((c) => c.marketType).filter(Boolean));
-    return MARKET_TABS.filter((tab) => tab === "ALL" || set.has(tab));
-  }, [coins]);
+  function sortBy(key) {
+    setSort((current) => {
+      if (current.key !== key) return { key, dir: 'desc' };
+      if (current.dir === 'desc') return { key, dir: 'asc' };
+      return { key: 'maxSizeUsd', dir: 'desc' };
+    });
+  }
+
+  function sortArrow(key) {
+    if (sort.key !== key) return '';
+    return sort.dir === 'desc' ? ' ↓' : ' ↑';
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const minSizeValue = Number(String(minSize).replace(/[^0-9.]/g, "")) || 0;
-    const minLevValue = Number(String(minLev).replace(/[^0-9.]/g, "")) || 0;
+    const minUsd = parseMoneyInput(minSize);
+    const minLev = Number(minLeverage || 0);
+    const favSet = new Set(favorites);
 
     const list = coins
-      .filter((coin) => market === "ALL" || coin.marketType === market)
-      .filter((coin) => !q || coin.symbol.toLowerCase().includes(q) || coin.displaySymbol?.toLowerCase().includes(q))
-      .filter((coin) => !onlyZeroFee || coin.isZeroFee)
-      .filter((coin) => !favoritesOnly || favorites.includes(coin.symbol))
-      .filter((coin) => !minSizeValue || Number(coin.maxSizeUsd) >= minSizeValue)
-      .filter((coin) => !minLevValue || Number(coin.maxLeverage) >= minLevValue);
+      .filter((coin) => !q || coin.symbol.toLowerCase().includes(q))
+      .filter((coin) => market === 'ALL' || coin.market === market)
+      .filter((coin) => !zeroOnly || coin.zeroFee)
+      .filter((coin) => !favoritesOnly || favSet.has(coin.symbol))
+      .filter((coin) => !minUsd || coin.maxSizeUsd >= minUsd)
+      .filter((coin) => !minLev || coin.maxLeverage >= minLev);
 
-    if (!sort.key || sort.dir === "none" || !SORTABLE.has(sort.key)) return list;
-
-    const direction = sort.dir === "asc" ? 1 : -1;
-    return [...list].sort((a, b) => {
-      let av;
-      let bv;
-      if (sort.key === "makerTaker") {
-        av = Number(a.makerFee) + Number(a.takerFee);
-        bv = Number(b.makerFee) + Number(b.takerFee);
-      } else if (sort.key === "symbol" || sort.key === "marketType") {
-        return String(a[sort.key] || "").localeCompare(String(b[sort.key] || "")) * direction;
-      } else {
-        av = Number(a[sort.key] || 0);
-        bv = Number(b[sort.key] || 0);
-      }
-      return (av - bv) * direction;
+    const sorted = [...list].sort((a, b) => {
+      const av = a[sort.key];
+      const bv = b[sort.key];
+      const res = typeof av === 'string' ? av.localeCompare(bv) : Number(av || 0) - Number(bv || 0);
+      return sort.dir === 'asc' ? res : -res;
     });
-  }, [coins, query, market, onlyZeroFee, favoritesOnly, favorites, minSize, minLev, sort]);
 
-  const stats = useMemo(() => {
-    const zero = coins.filter((c) => c.isZeroFee).length;
-    const fav = favorites.length;
-    return { total: coins.length, zero, fav };
-  }, [coins, favorites]);
+    return sorted;
+  }, [coins, query, market, zeroOnly, favoritesOnly, minSize, minLeverage, favorites, sort]);
 
   return (
     <main className="page">
-      <section className="hero">
+      <section className="topbar">
         <div>
-          <div className="kicker">MEXC Futures Scanner</div>
+          <div className="eyebrow">MEXC Futures Scanner</div>
           <h1>Лимиты позиции и 0 fee</h1>
-          <p>Max size показывает общий максимальный размер позиции в $, отдельно от max leverage. Тикер копируется кликом.</p>
+          <p className="subtitle">Max size показывает общий максимальный размер позиции в $, отдельно от max leverage. Тикер копируется кликом. Звезда в заголовке включает фильтр по избранным.</p>
           <div className="meta">
-            <span>{stats.total} contracts</span>
-            <span>{stats.zero} zero-fee</span>
-            <span>{stats.fav} favorites</span>
-            {updatedAt && <span>Updated: {new Date(updatedAt).toLocaleString("ru-RU")}</span>}
+            <span className="pill">{coins.length} contracts</span>
+            <span className="pill">{coins.filter((c) => c.zeroFee).length} zero-fee</span>
+            <span className="pill">{favorites.length} favorites</span>
+            <span className="pill">Updated: {updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : '—'}</span>
           </div>
         </div>
-        <button className="refresh" onClick={loadData} disabled={loading}>{loading ? "Обновляю..." : "Обновить"}</button>
+        <button className="refresh" onClick={loadData} disabled={loading}>{loading ? 'Обновляю...' : 'Обновить'}</button>
       </section>
 
-      <section className="panel filters">
-        <input
-          className="search"
-          placeholder="Search: BTC, TIA, PEPE..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      {error ? <div className="error">Ошибка: {error}</div> : null}
 
-        <div className="tabs">
-          {marketsAvailable.map((tab) => (
-            <button key={tab} className={market === tab ? "tab active" : "tab"} onClick={() => setMarket(tab)}>{tab}</button>
-          ))}
+      <section className="controls">
+        <div className="controls-row">
+          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: BTC, TIA, PEPE..." />
+          <div className="tabs">
+            {MARKETS.map((item) => (
+              <button key={item} className={`tab ${market === item ? 'active' : ''}`} onClick={() => setMarket(item)}>{item}</button>
+            ))}
+          </div>
+          <div className="spacer" />
+          <button className={`zero-button ${zeroOnly ? 'active' : ''}`} onClick={() => setZeroOnly((v) => !v)}>0 fee</button>
         </div>
-
-        <div className="miniFilters">
-          <label className="check"><input type="checkbox" checked={onlyZeroFee} onChange={(e) => setOnlyZeroFee(e.target.checked)} /> 0 fee</label>
-          <label className="check"><input type="checkbox" checked={favoritesOnly} onChange={(e) => setFavoritesOnly(e.target.checked)} /> Favorites</label>
-          <input className="smallInput" placeholder="Min size $" value={minSize} onChange={(e) => setMinSize(e.target.value)} />
-          <input className="smallInput" placeholder="Min lev" value={minLev} onChange={(e) => setMinLev(e.target.value)} />
+        <div className="controls-row">
+          <label className="filter-group">Size ≥ <input className="filter-input" value={minSize} onChange={(e) => setMinSize(e.target.value)} placeholder="1m / 500k" /></label>
+          <label className="filter-group">Leverage ≥ <input className="filter-input" value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} placeholder="100" /></label>
         </div>
       </section>
 
-      {error && <div className="error">{error}</div>}
-      {copied && <div className="toast">{copied}</div>}
-
-      <section className="tableWrap">
+      <section className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th><SortLabel label="Symbol" column="symbol" sort={sort} setSort={setSort} /></th>
-              <th><SortLabel label="Market" column="marketType" sort={sort} setSort={setSort} /></th>
-              <th className="num"><SortLabel label="Max size $" column="maxSizeUsd" sort={sort} setSort={setSort} align="right" /></th>
-              <th className="num"><SortLabel label="Contracts" column="contracts" sort={sort} setSort={setSort} align="right" /></th>
-              <th className="num"><SortLabel label="Max leverage" column="maxLeverage" sort={sort} setSort={setSort} align="right" /></th>
-              <th>0 fee</th>
-              <th className="num"><SortLabel label="Maker / Taker" column="makerTaker" sort={sort} setSort={setSort} align="right" /></th>
-              <th className="num"><SortLabel label="Price" column="price" sort={sort} setSort={setSort} align="right" /></th>
+              <th style={{ width: 44 }}>
+                <button
+                  className={`header-star ${favoritesOnly ? 'active' : ''}`}
+                  onClick={toggleFavoritesOnly}
+                  title="Показать только избранные"
+                >★</button>
+              </th>
+              <th className="sortable" onClick={() => sortBy('symbol')}>Symbol{sortArrow('symbol')}</th>
+              <th className="sortable" onClick={() => sortBy('market')}>Market{sortArrow('market')}</th>
+              <th className="sortable num" onClick={() => sortBy('maxSizeUsd')}>Max size ${sortArrow('maxSizeUsd')}</th>
+              <th className="sortable num" onClick={() => sortBy('contracts')}>Contracts{sortArrow('contracts')}</th>
+              <th className="sortable num" onClick={() => sortBy('maxLeverage')}>Max leverage{sortArrow('maxLeverage')}</th>
+              <th className="sortable" onClick={() => sortBy('zeroFee')}>0 fee{sortArrow('zeroFee')}</th>
+              <th>Maker / Taker</th>
+              <th className="sortable num" onClick={() => sortBy('price')}>Price{sortArrow('price')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((coin) => {
-              const fav = favorites.includes(coin.symbol);
+              const isFav = favorites.includes(coin.symbol);
               return (
                 <tr key={coin.symbol}>
-                  <td className="symbolCell">
-                    <button className={fav ? "star active" : "star"} onClick={() => toggleFavorite(coin.symbol)} title="Add to favorites">{fav ? "★" : "☆"}</button>
-                    <button className="symbolBtn" onClick={() => copySymbol(coin.symbol)} title="Copy symbol">{coin.symbol}</button>
+                  <td style={{ width: 44 }}>
+                    <button
+                      className={`star-button ${isFav ? 'active' : ''}`}
+                      onClick={() => toggleFavorite(coin.symbol)}
+                      title={isFav ? 'Убрать из избранного' : 'Добавить в избранное'}
+                    >★</button>
                   </td>
-                  <td><span className="marketBadge">{coin.marketType}</span></td>
-                  <td className="num money">{formatUsd(coin.maxSizeUsd)}</td>
+                  <td><span className="symbol" onClick={() => copySymbol(coin.symbol)}>{coin.symbol}</span></td>
+                  <td><span className="market-badge">{coin.market}</span></td>
+                  <td className="num size">{formatUsd(coin.maxSizeUsd)}</td>
                   <td className="num">{formatNumber(coin.contracts)}</td>
-                  <td className="num strong">{formatNumber(coin.maxLeverage)}x</td>
-                  <td><span className={coin.isZeroFee ? "pill yes" : "pill no"}>{coin.isZeroFee ? "YES" : "NO"}</span></td>
-                  <td className="num">{formatFee(coin.makerFee)} / {formatFee(coin.takerFee)}</td>
+                  <td className="num">{formatNumber(coin.maxLeverage)}x</td>
+                  <td><span className={`fee-badge ${coin.zeroFee ? 'fee-yes' : 'fee-no'}`}>{coin.zeroFee ? 'YES' : 'NO'}</span></td>
+                  <td>{formatFee(coin.makerFee)} / {formatFee(coin.takerFee)}</td>
                   <td className="num">{formatPrice(coin.price)}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!filtered.length && <div className="empty">Ничего не найдено. Ослабь фильтры.</div>}
+        {!filtered.length ? <div className="empty">Ничего не найдено. Ослабь фильтры.</div> : null}
       </section>
+      {toast ? <div className="toast">{toast}</div> : null}
     </main>
   );
 }
