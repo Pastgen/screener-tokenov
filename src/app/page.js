@@ -88,10 +88,6 @@ export default function Home() {
     setFavorites((prev) => prev.includes(symbol) ? prev.filter((x) => x !== symbol) : [...prev, symbol]);
   }
 
-  function toggleFavoritesOnly() {
-    setFavoritesOnly((value) => !value);
-  }
-
   function sortBy(key) {
     setSort((current) => {
       if (current.key !== key) return { key, dir: 'desc' };
@@ -119,14 +115,12 @@ export default function Home() {
       .filter((coin) => !minUsd || coin.maxSizeUsd >= minUsd)
       .filter((coin) => !minLev || coin.maxLeverage >= minLev);
 
-    const sorted = [...list].sort((a, b) => {
+    return [...list].sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
       const res = typeof av === 'string' ? av.localeCompare(bv) : Number(av || 0) - Number(bv || 0);
       return sort.dir === 'asc' ? res : -res;
     });
-
-    return sorted;
   }, [coins, query, market, zeroOnly, favoritesOnly, minSize, minLeverage, favorites, sort]);
 
   return (
@@ -135,12 +129,12 @@ export default function Home() {
         <div>
           <div className="eyebrow">MEXC Futures Scanner</div>
           <h1>Лимиты позиции и 0 fee</h1>
-          <p className="subtitle">Max size показывает общий максимальный размер позиции в $, отдельно от max leverage. Тикер копируется кликом. Звезда в заголовке включает фильтр по избранным.</p>
+          <p className="subtitle">Max size = общий максимальный размер позиции в $, max leverage показывается отдельно. Клик по тикеру копирует symbol.</p>
           <div className="meta">
-            <span className="pill">{coins.length} contracts</span>
-            <span className="pill">{coins.filter((c) => c.zeroFee).length} zero-fee</span>
-            <span className="pill">{favorites.length} favorites</span>
-            <span className="pill">Updated: {updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : '—'}</span>
+            <span>{coins.length} contracts</span>
+            <span>{coins.filter((c) => c.zeroFee).length} zero-fee</span>
+            <span>{favorites.length} favorites</span>
+            <span>Updated: {updatedAt ? new Date(updatedAt).toLocaleString('ru-RU') : '—'}</span>
           </div>
         </div>
         <button className="refresh" onClick={loadData} disabled={loading}>{loading ? 'Обновляю...' : 'Обновить'}</button>
@@ -149,19 +143,25 @@ export default function Home() {
       {error ? <div className="error">Ошибка: {error}</div> : null}
 
       <section className="controls">
-        <div className="controls-row">
-          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: BTC, TIA, PEPE..." />
+        <div className="controls-row main-controls">
+          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbol" />
           <div className="tabs">
             {MARKETS.map((item) => (
               <button key={item} className={`tab ${market === item ? 'active' : ''}`} onClick={() => setMarket(item)}>{item}</button>
             ))}
           </div>
-          <div className="spacer" />
           <button className={`zero-button ${zeroOnly ? 'active' : ''}`} onClick={() => setZeroOnly((v) => !v)}>0 fee</button>
         </div>
-        <div className="controls-row">
-          <label className="filter-group">Size ≥ <input className="filter-input" value={minSize} onChange={(e) => setMinSize(e.target.value)} placeholder="1m / 500k" /></label>
-          <label className="filter-group">Leverage ≥ <input className="filter-input" value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} placeholder="100" /></label>
+
+        <div className="controls-row filter-controls">
+          <label className="filter-box">
+            <span>Size ≥</span>
+            <input value={minSize} onChange={(e) => setMinSize(e.target.value)} placeholder="500k / 1m" />
+          </label>
+          <label className="filter-box">
+            <span>Leverage ≥</span>
+            <input value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} placeholder="100" />
+          </label>
         </div>
       </section>
 
@@ -169,11 +169,12 @@ export default function Home() {
         <table>
           <thead>
             <tr>
-              <th style={{ width: 44 }}>
+              <th className="fav-head-cell">
                 <button
-                  className={`header-star ${favoritesOnly ? 'active' : ''}`}
-                  onClick={toggleFavoritesOnly}
+                  className={`favorite-filter ${favoritesOnly ? 'active' : ''}`}
+                  onClick={() => setFavoritesOnly((value) => !value)}
                   title="Показать только избранные"
+                  aria-label="Показать только избранные"
                 >★</button>
               </th>
               <th className="sortable" onClick={() => sortBy('symbol')}>Symbol{sortArrow('symbol')}</th>
@@ -191,9 +192,9 @@ export default function Home() {
               const isFav = favorites.includes(coin.symbol);
               return (
                 <tr key={coin.symbol}>
-                  <td style={{ width: 44 }}>
+                  <td className="fav-cell">
                     <button
-                      className={`star-button ${isFav ? 'active' : ''}`}
+                      className={`row-star ${isFav ? 'active' : ''}`}
                       onClick={() => toggleFavorite(coin.symbol)}
                       title={isFav ? 'Убрать из избранного' : 'Добавить в избранное'}
                     >★</button>
