@@ -1,253 +1,242 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import "./styles.css";
 
-function usd(value) {
-  return "$" + Math.round(Number(value || 0)).toLocaleString("en-US");
+const MARKET_TABS = ["ALL", "USDT-M", "USDC-M", "USD1-M", "USD-M", "COIN-M"];
+const SORTABLE = new Set(["symbol", "maxSizeUsd", "contracts", "maxLeverage", "makerTaker", "price", "marketType"]);
+
+function formatUsd(value) {
+  return `$${Math.round(Number(value || 0)).toLocaleString("en-US")}`;
 }
 
-function num(value) {
-  return Math.round(Number(value || 0)).toLocaleString("en-US");
+function formatNumber(value) {
+  const n = Number(value || 0);
+  if (n >= 1_000_000_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (n >= 1_000_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  if (n >= 1_000) return n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: 4 }).replace(/\.0+$/, "");
 }
 
-function feePct(v) {
-  const n = Number(v || 0) * 100;
-  if (n === 0) return "0%";
-  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") + "%";
+function formatPrice(value) {
+  const n = Number(value || 0);
+  if (n >= 100) return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (n >= 1) return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  return n.toLocaleString("en-US", { maximumSignificantDigits: 8 });
+}
+
+function formatFee(value) {
+  const n = Number(value || 0) * 100;
+  if (Math.abs(n) < 0.000001) return "0%";
+  return `${n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}%`;
+}
+
+function nextSort(current, key) {
+  if (current.key !== key) return { key, dir: "desc" };
+  if (current.dir === "desc") return { key, dir: "asc" };
+  return { key: "", dir: "none" };
+}
+
+function SortLabel({ label, column, sort, setSort, align = "left" }) {
+  const active = sort.key === column && sort.dir !== "none";
+  const arrow = active ? (sort.dir === "desc" ? "↓" : "↑") : "";
+  return (
+    <button
+      className={`sortHead ${active ? "active" : ""} ${align === "right" ? "right" : ""}`}
+      onClick={() => setSort((s) => nextSort(s, column))}
+      title="Нажми: убывание → возрастание → без сортировки"
+    >
+      <span>{label}</span>
+      <span className="arrow">{arrow}</span>
+    </button>
+  );
 }
 
 export default function Home() {
-  const [rows, setRows] = useState([]);
-  const [updatedAt, setUpdatedAt] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [coins, setCoins] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [onlyZero, setOnlyZero] = useState(false);
-  const [sortKey, setSortKey] = useState("maxSizeUsd");
-  const [copied, setCopied] = useState("");
+  const [updatedAt, setUpdatedAt] = useState("");
 
-  async function load() {
+  const [query, setQuery] = useState("");
+  const [market, setMarket] = useState("ALL");
+  const [onlyZeroFee, setOnlyZeroFee] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [minSize, setMinSize] = useState("");
+  const [minLev, setMinLev] = useState("");
+  const [favorites, setFavorites] = useState([]);
+  const [copied, setCopied] = useState("");
+  const [sort, setSort] = useState({ key: "maxSizeUsd", dir: "desc" });
+
+  async function loadData() {
     setLoading(true);
     setError("");
     try {
       const res = await fetch("/api/mexc", { cache: "no-store" });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Failed to load");
-      setRows(data.rows || []);
-      setUpdatedAt(data.updatedAt);
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to load data");
+      setCoins(Array.isArray(data.coins) ? data.coins : []);
+      setUpdatedAt(data.updatedAt || new Date().toISOString());
     } catch (e) {
-      setError(String(e.message || e));
+      setError(e.message || "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    loadData();
+    try {
+      const stored = JSON.parse(localStorage.getItem("mexcScannerFavorites") || "[]");
+      if (Array.isArray(stored)) setFavorites(stored);
+    } catch {}
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows
-      .filter((r) => !q || r.symbol.toLowerCase().includes(q))
-      .filter((r) => !onlyZero || r.isZeroFee)
-      .sort((a, b) => {
-        if (sortKey === "maxLeverage") return b.maxLeverage - a.maxLeverage;
-        return b.maxSizeUsd - a.maxSizeUsd;
-      });
-  }, [rows, search, onlyZero, sortKey]);
+  function saveFavorites(next) {
+    setFavorites(next);
+    localStorage.setItem("mexcScannerFavorites", JSON.stringify(next));
+  }
+
+  function toggleFavorite(symbol) {
+    const next = favorites.includes(symbol)
+      ? favorites.filter((s) => s !== symbol)
+      : [...favorites, symbol];
+    saveFavorites(next);
+  }
 
   async function copySymbol(symbol) {
     try {
       await navigator.clipboard.writeText(symbol);
-      setCopied(symbol);
-      setTimeout(() => setCopied(""), 1100);
-    } catch {}
+      setCopied(`${symbol} copied`);
+      setTimeout(() => setCopied(""), 1200);
+    } catch {
+      setCopied("Copy failed");
+      setTimeout(() => setCopied(""), 1200);
+    }
   }
+
+  const marketsAvailable = useMemo(() => {
+    const set = new Set(coins.map((c) => c.marketType).filter(Boolean));
+    return MARKET_TABS.filter((tab) => tab === "ALL" || set.has(tab));
+  }, [coins]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const minSizeValue = Number(String(minSize).replace(/[^0-9.]/g, "")) || 0;
+    const minLevValue = Number(String(minLev).replace(/[^0-9.]/g, "")) || 0;
+
+    const list = coins
+      .filter((coin) => market === "ALL" || coin.marketType === market)
+      .filter((coin) => !q || coin.symbol.toLowerCase().includes(q) || coin.displaySymbol?.toLowerCase().includes(q))
+      .filter((coin) => !onlyZeroFee || coin.isZeroFee)
+      .filter((coin) => !favoritesOnly || favorites.includes(coin.symbol))
+      .filter((coin) => !minSizeValue || Number(coin.maxSizeUsd) >= minSizeValue)
+      .filter((coin) => !minLevValue || Number(coin.maxLeverage) >= minLevValue);
+
+    if (!sort.key || sort.dir === "none" || !SORTABLE.has(sort.key)) return list;
+
+    const direction = sort.dir === "asc" ? 1 : -1;
+    return [...list].sort((a, b) => {
+      let av;
+      let bv;
+      if (sort.key === "makerTaker") {
+        av = Number(a.makerFee) + Number(a.takerFee);
+        bv = Number(b.makerFee) + Number(b.takerFee);
+      } else if (sort.key === "symbol" || sort.key === "marketType") {
+        return String(a[sort.key] || "").localeCompare(String(b[sort.key] || "")) * direction;
+      } else {
+        av = Number(a[sort.key] || 0);
+        bv = Number(b[sort.key] || 0);
+      }
+      return (av - bv) * direction;
+    });
+  }, [coins, query, market, onlyZeroFee, favoritesOnly, favorites, minSize, minLev, sort]);
+
+  const stats = useMemo(() => {
+    const zero = coins.filter((c) => c.isZeroFee).length;
+    const fav = favorites.length;
+    return { total: coins.length, zero, fav };
+  }, [coins, favorites]);
 
   return (
     <main className="page">
-      <section className="header">
+      <section className="hero">
         <div>
-          <p className="tag">MEXC Futures Scanner</p>
+          <div className="kicker">MEXC Futures Scanner</div>
           <h1>Лимиты позиции и 0 fee</h1>
-          <p className="sub">
-            Max size показывает общий максимальный размер позиции в $, отдельно от max leverage. Плечо не привязывается к размеру позиции.
-          </p>
-          <p className="updated">Updated: {updatedAt ? new Date(updatedAt).toLocaleString("ru-RU") : "—"}</p>
+          <p>Max size показывает общий максимальный размер позиции в $, отдельно от max leverage. Тикер копируется кликом.</p>
+          <div className="meta">
+            <span>{stats.total} contracts</span>
+            <span>{stats.zero} zero-fee</span>
+            <span>{stats.fav} favorites</span>
+            {updatedAt && <span>Updated: {new Date(updatedAt).toLocaleString("ru-RU")}</span>}
+          </div>
         </div>
-        <button className="refresh" onClick={load} disabled={loading}>{loading ? "Обновляю..." : "Обновить"}</button>
+        <button className="refresh" onClick={loadData} disabled={loading}>{loading ? "Обновляю..." : "Обновить"}</button>
       </section>
 
       <section className="panel filters">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: BTC, TIA, PEPE..." />
-        <label className="check"><input type="checkbox" checked={onlyZero} onChange={(e) => setOnlyZero(e.target.checked)} /> Только 0 fee</label>
-        <button className={sortKey === "maxSizeUsd" ? "active" : ""} onClick={() => setSortKey("maxSizeUsd")}>Max size ↓</button>
-        <button className={sortKey === "maxLeverage" ? "active" : ""} onClick={() => setSortKey("maxLeverage")}>Max leverage ↓</button>
+        <input
+          className="search"
+          placeholder="Search: BTC, TIA, PEPE..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+
+        <div className="tabs">
+          {marketsAvailable.map((tab) => (
+            <button key={tab} className={market === tab ? "tab active" : "tab"} onClick={() => setMarket(tab)}>{tab}</button>
+          ))}
+        </div>
+
+        <div className="miniFilters">
+          <label className="check"><input type="checkbox" checked={onlyZeroFee} onChange={(e) => setOnlyZeroFee(e.target.checked)} /> 0 fee</label>
+          <label className="check"><input type="checkbox" checked={favoritesOnly} onChange={(e) => setFavoritesOnly(e.target.checked)} /> Favorites</label>
+          <input className="smallInput" placeholder="Min size $" value={minSize} onChange={(e) => setMinSize(e.target.value)} />
+          <input className="smallInput" placeholder="Min lev" value={minLev} onChange={(e) => setMinLev(e.target.value)} />
+        </div>
       </section>
 
-      {error && <div className="err">Ошибка: {error}</div>}
-      {copied && <div className="toast">Скопировано: {copied}</div>}
+      {error && <div className="error">{error}</div>}
+      {copied && <div className="toast">{copied}</div>}
 
       <section className="tableWrap">
         <table>
           <thead>
             <tr>
-              <th>Symbol</th>
-              <th>Max size $</th>
-              <th>Contracts</th>
-              <th>Max leverage</th>
+              <th><SortLabel label="Symbol" column="symbol" sort={sort} setSort={setSort} /></th>
+              <th><SortLabel label="Market" column="marketType" sort={sort} setSort={setSort} /></th>
+              <th className="num"><SortLabel label="Max size $" column="maxSizeUsd" sort={sort} setSort={setSort} align="right" /></th>
+              <th className="num"><SortLabel label="Contracts" column="contracts" sort={sort} setSort={setSort} align="right" /></th>
+              <th className="num"><SortLabel label="Max leverage" column="maxLeverage" sort={sort} setSort={setSort} align="right" /></th>
               <th>0 fee</th>
-              <th>Maker / Taker</th>
-              <th>Price</th>
+              <th className="num"><SortLabel label="Maker / Taker" column="makerTaker" sort={sort} setSort={setSort} align="right" /></th>
+              <th className="num"><SortLabel label="Price" column="price" sort={sort} setSort={setSort} align="right" /></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => (
-              <tr key={r.symbol}>
-                <td><button className="symbol" onClick={() => copySymbol(r.symbol)} title="Click to copy">{r.symbol}</button></td>
-                <td className="money">{usd(r.maxSizeUsd)}</td>
-                <td>{num(r.overallMaxContracts)}</td>
-                <td>{r.maxLeverage}x</td>
-                <td><span className={r.isZeroFee ? "yes" : "no"}>{r.isZeroFee ? "YES" : "NO"}</span></td>
-                <td>{feePct(r.makerFee)} / {feePct(r.takerFee)}</td>
-                <td>{Number(r.price).toLocaleString("en-US", { maximumSignificantDigits: 10 })}</td>
-              </tr>
-            ))}
+            {filtered.map((coin) => {
+              const fav = favorites.includes(coin.symbol);
+              return (
+                <tr key={coin.symbol}>
+                  <td className="symbolCell">
+                    <button className={fav ? "star active" : "star"} onClick={() => toggleFavorite(coin.symbol)} title="Add to favorites">{fav ? "★" : "☆"}</button>
+                    <button className="symbolBtn" onClick={() => copySymbol(coin.symbol)} title="Copy symbol">{coin.symbol}</button>
+                  </td>
+                  <td><span className="marketBadge">{coin.marketType}</span></td>
+                  <td className="num money">{formatUsd(coin.maxSizeUsd)}</td>
+                  <td className="num">{formatNumber(coin.contracts)}</td>
+                  <td className="num strong">{formatNumber(coin.maxLeverage)}x</td>
+                  <td><span className={coin.isZeroFee ? "pill yes" : "pill no"}>{coin.isZeroFee ? "YES" : "NO"}</span></td>
+                  <td className="num">{formatFee(coin.makerFee)} / {formatFee(coin.takerFee)}</td>
+                  <td className="num">{formatPrice(coin.price)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        {!filtered.length && <div className="empty">Ничего не найдено. Ослабь фильтры.</div>}
       </section>
-
-      <style jsx>{`
-        * { box-sizing: border-box; }
-        .page {
-          min-height: 100vh;
-          background: radial-gradient(circle at top left, rgba(32, 208, 159, 0.08), transparent 34%), #070b12;
-          color: #eef5ff;
-          padding: 42px 20px;
-          font-family: Inter, Arial, sans-serif;
-        }
-        .header, .panel, .tableWrap { max-width: 1180px; margin: 0 auto; }
-        .header {
-          display: grid;
-          grid-template-columns: 1fr auto;
-          align-items: start;
-          gap: 24px;
-          margin-bottom: 22px;
-        }
-        .tag { color: #22e6c2; font-weight: 900; margin: 0 0 8px; font-size: 13px; letter-spacing: .02em; }
-        h1 { margin: 0; font-size: 34px; line-height: 1.05; letter-spacing: -0.04em; }
-        .sub { color: #a9b9d6; margin: 10px 0 0; max-width: 780px; line-height: 1.45; }
-        .updated { color: #8ea2c3; font-size: 13px; margin: 14px 0 0; }
-        .refresh, .filters button {
-          border: 0;
-          border-radius: 14px;
-          font-weight: 900;
-          padding: 13px 20px;
-          cursor: pointer;
-          transition: transform .12s ease, opacity .12s ease, border-color .12s ease;
-          white-space: nowrap;
-        }
-        .refresh:hover, .filters button:hover { transform: translateY(-1px); }
-        .refresh:disabled { opacity: .65; cursor: default; transform: none; }
-        .refresh, .filters button.active { background: #20d09f; color: #061018; }
-        .filters button { background: #102143; color: #eef5ff; border: 1px solid #254675; }
-        .panel {
-          background: rgba(16, 25, 38, .92);
-          border: 1px solid #223753;
-          border-radius: 18px;
-          padding: 14px;
-          display: grid;
-          grid-template-columns: minmax(220px, 320px) 1fr auto auto auto;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 16px;
-          box-shadow: 0 14px 40px rgba(0,0,0,.18);
-        }
-        input {
-          width: 100%;
-          background: #07101c;
-          border: 1px solid #2d476b;
-          color: white;
-          border-radius: 13px;
-          padding: 13px 16px;
-          outline: none;
-          font-weight: 700;
-        }
-        input:focus { border-color: #20d09f; }
-        .check {
-          justify-self: end;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          color: #e8f1ff;
-          font-weight: 850;
-          white-space: nowrap;
-        }
-        .check input { width: 16px; height: 16px; min-width: 16px; accent-color: #20d09f; }
-        .tableWrap {
-          overflow: auto;
-          border: 1px solid #223753;
-          border-radius: 16px;
-          background: rgba(16, 25, 38, .94);
-          box-shadow: 0 18px 46px rgba(0,0,0,.22);
-        }
-        table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; }
-        th {
-          color: #78b7ff;
-          font-size: 13px;
-          text-align: left;
-          padding: 15px 16px;
-          background: #101b2b;
-          border-bottom: 1px solid #263a58;
-          font-weight: 900;
-        }
-        td {
-          padding: 17px 16px;
-          border-bottom: 1px solid #22334d;
-          font-weight: 760;
-          vertical-align: middle;
-        }
-        tr:last-child td { border-bottom: 0; }
-        th:nth-child(1), td:nth-child(1) { width: 20%; }
-        th:nth-child(2), td:nth-child(2) { width: 18%; }
-        th:nth-child(3), td:nth-child(3) { width: 16%; }
-        th:nth-child(4), td:nth-child(4) { width: 13%; }
-        th:nth-child(5), td:nth-child(5) { width: 11%; }
-        th:nth-child(6), td:nth-child(6) { width: 13%; }
-        th:nth-child(7), td:nth-child(7) { width: 12%; }
-        .money { color: #29f0ad; font-size: 18px; font-weight: 1000; letter-spacing: -0.02em; }
-        .symbol {
-          background: transparent;
-          color: white;
-          border: 0;
-          font: inherit;
-          font-weight: 1000;
-          cursor: pointer;
-          padding: 0;
-          letter-spacing: .01em;
-        }
-        .symbol:hover { color: #20d09f; }
-        .yes, .no {
-          border-radius: 999px;
-          padding: 7px 11px;
-          font-size: 12px;
-          font-weight: 1000;
-          display: inline-block;
-          min-width: 44px;
-          text-align: center;
-        }
-        .yes { color: #9fffd6; background: rgba(20, 185, 120, .42); }
-        .no { color: #ffb4c3; background: rgba(220, 40, 80, .28); }
-        .err { max-width: 1180px; margin: 0 auto 16px; color: #ffbac7; background: #35111b; border: 1px solid #7b2235; padding: 12px; border-radius: 12px; }
-        .toast { position: fixed; right: 24px; bottom: 24px; background: #20d09f; color: #071016; padding: 13px 18px; border-radius: 14px; font-weight: 1000; box-shadow: 0 12px 34px rgba(0,0,0,.35); }
-        @media (max-width: 900px) {
-          .header { grid-template-columns: 1fr; }
-          .panel { grid-template-columns: 1fr; align-items: stretch; }
-          .check { justify-self: start; }
-          .refresh, .filters button { width: 100%; }
-        }
-      `}</style>
     </main>
   );
 }

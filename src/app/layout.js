@@ -1,8 +1,6 @@
-import "./globals.css";
-
 export const metadata = {
-  title: "MEXC Futures Scanner",
-  description: "MEXC Futures max size, leverage and zero fee scanner"
+  title: 'MEXC Futures Scanner',
+  description: 'MEXC Futures max size and fee scanner',
 };
 
 export default function RootLayout({ children }) {

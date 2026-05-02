@@ -1,81 +1,97 @@
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-function toNum(value, fallback = 0) {
+const API_BASE = 'https://contract.mexc.com/api/v1';
+
+function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function getTickerPrice(t) {
-  return toNum(
-    t.lastPrice ?? t.last ?? t.fairPrice ?? t.indexPrice ?? t.bid1 ?? t.ask1,
-    0
-  );
+function getMarketType(coin) {
+  const symbol = String(coin.symbol || '');
+  const quote = String(coin.quoteCoin || '').toUpperCase();
+  const settle = String(coin.settleCoin || '').toUpperCase();
+  const base = String(coin.baseCoin || '').toUpperCase();
+  const contractType = String(coin.contractType || coin.type || '').toUpperCase();
+
+  if (settle === 'USDT' || quote === 'USDT' || symbol.endsWith('_USDT')) return 'USDT-M';
+  if (settle === 'USDC' || quote === 'USDC' || symbol.endsWith('_USDC')) return 'USDC-M';
+  if (settle === 'USD1' || quote === 'USD1' || symbol.endsWith('_USD1')) return 'USD1-M';
+  if (settle === 'USD' || quote === 'USD' || symbol.endsWith('_USD')) return 'USD-M';
+  if (contractType.includes('INVERSE') || (settle && settle === base)) return 'COIN-M';
+  return settle ? `${settle}-M` : 'OTHER';
 }
 
-function getOverallMaxContracts(coin) {
-  const maxVol = toNum(coin.maxVol, 0);
-  const riskBaseVol = toNum(coin.riskBaseVol, 0);
-  const riskIncrVol = toNum(coin.riskIncrVol, 0);
-  const riskLevelLimit = Math.max(1, toNum(coin.riskLevelLimit, 1));
+function getOverallContracts(coin) {
+  const maxVol = toNumber(coin.maxVol);
+  const riskBaseVol = toNumber(coin.riskBaseVol);
+  const riskIncrVol = toNumber(coin.riskIncrVol);
+  const riskLevelLimit = Math.max(1, toNumber(coin.riskLevelLimit, 1));
 
-  // Overall position capacity estimate from public risk fields.
-  // This is NOT attached to maxLeverage. It is only the largest position size.
-  const riskUpper = riskBaseVol > 0
-    ? riskBaseVol + riskIncrVol * Math.max(0, riskLevelLimit - 1)
+  // MEXC public contract fields often expose the overall position cap through risk fields.
+  // We keep it separate from max leverage because this overall cap is NOT necessarily available at max leverage.
+  const riskOverall = riskBaseVol > 0
+    ? riskBaseVol + Math.max(0, riskLevelLimit - 1) * riskIncrVol
     : 0;
 
-  return Math.max(maxVol, riskUpper);
+  return Math.max(maxVol, riskOverall);
+}
+
+function formatFee(value) {
+  const n = toNumber(value);
+  return n;
 }
 
 export async function GET() {
   try {
-    const [detailsRes, tickerRes] = await Promise.all([
-      fetch("https://contract.mexc.com/api/v1/contract/detail", { cache: "no-store" }),
-      fetch("https://contract.mexc.com/api/v1/contract/ticker", { cache: "no-store" })
+    const [contractsRes, tickersRes] = await Promise.all([
+      fetch(`${API_BASE}/contract/detail`, { cache: 'no-store' }),
+      fetch(`${API_BASE}/contract/ticker`, { cache: 'no-store' }),
     ]);
 
-    const detailsJson = await detailsRes.json();
-    const tickerJson = await tickerRes.json();
-
-    const details = Array.isArray(detailsJson.data) ? detailsJson.data : [];
-    const tickers = Array.isArray(tickerJson.data) ? tickerJson.data : [];
-
-    const prices = new Map();
-    for (const t of tickers) {
-      if (t.symbol) prices.set(t.symbol, getTickerPrice(t));
+    if (!contractsRes.ok || !tickersRes.ok) {
+      return Response.json({ error: 'MEXC request failed' }, { status: 502 });
     }
 
-    const rows = details
-      .filter((coin) => coin && coin.symbol && coin.symbol.includes("_"))
+    const contractsJson = await contractsRes.json();
+    const tickersJson = await tickersRes.json();
+
+    const tickers = Array.isArray(tickersJson.data) ? tickersJson.data : [];
+    const prices = Object.fromEntries(tickers.map((t) => [t.symbol, toNumber(t.lastPrice || t.fairPrice || t.indexPrice)]));
+
+    const contracts = Array.isArray(contractsJson.data) ? contractsJson.data : [];
+
+    const coins = contracts
+      .filter((coin) => coin && coin.symbol)
       .map((coin) => {
-        const price = prices.get(coin.symbol) || 0;
-        const contractSize = toNum(coin.contractSize, 1);
-        const maxVol = toNum(coin.maxVol, 0);
-        const overallMaxContracts = getOverallMaxContracts(coin);
-        const maxSizeUsd = overallMaxContracts * contractSize * price;
-        const basicMaxUsd = maxVol * contractSize * price;
-        const makerFee = toNum(coin.makerFeeRate, 0);
-        const takerFee = toNum(coin.takerFeeRate, 0);
+        const price = prices[coin.symbol] || toNumber(coin.fairPrice || coin.indexPrice || coin.price);
+        const contractSize = toNumber(coin.contractSize, 1);
+        const contractsCap = getOverallContracts(coin);
+        const maxSizeUsd = contractsCap * contractSize * price;
+        const makerFee = formatFee(coin.makerFeeRate);
+        const takerFee = formatFee(coin.takerFeeRate);
+        const marketType = getMarketType(coin);
 
         return {
           symbol: coin.symbol,
+          displaySymbol: String(coin.symbol).replace('_', ''),
+          marketType,
+          quoteCoin: coin.quoteCoin || null,
+          settleCoin: coin.settleCoin || null,
           maxSizeUsd,
-          basicMaxUsd,
-          maxLeverage: toNum(coin.maxLeverage, 0),
+          contracts: contractsCap,
+          maxLeverage: toNumber(coin.maxLeverage),
           makerFee,
           takerFee,
           isZeroFee: makerFee === 0 && takerFee === 0,
           price,
-          maxVol,
-          overallMaxContracts,
-          source: overallMaxContracts > maxVol ? "risk fields" : "maxVol"
         };
       })
-      .filter((r) => r.price > 0)
+      .filter((coin) => coin.price > 0)
       .sort((a, b) => b.maxSizeUsd - a.maxSizeUsd);
 
-    return Response.json({ ok: true, updatedAt: new Date().toISOString(), rows });
+    return Response.json({ updatedAt: new Date().toISOString(), coins });
   } catch (error) {
-    return Response.json({ ok: false, error: String(error?.message || error) }, { status: 500 });
+    return Response.json({ error: error?.message || 'Unknown error' }, { status: 500 });
   }
 }
