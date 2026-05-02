@@ -17,7 +17,7 @@ function formatNumber(value, maximumFractionDigits = 0) {
 function formatPrice(value) {
   const n = Number(value || 0);
   if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  if (n >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  if (n >= 1) return n.toLocaleString('en-US', { maximumFractionDigits: 5 });
   return n.toLocaleString('en-US', { maximumSignificantDigits: 8 });
 }
 
@@ -129,7 +129,6 @@ export default function Home() {
         <div>
           <div className="eyebrow">MEXC Futures Scanner</div>
           <h1>Лимиты позиции и 0 fee</h1>
-          <p className="subtitle">Max size = общий максимальный размер позиции в $, max leverage показывается отдельно. Клик по тикеру копирует symbol.</p>
           <div className="meta">
             <span>{coins.length} contracts</span>
             <span>{coins.filter((c) => c.zeroFee).length} zero-fee</span>
@@ -143,8 +142,8 @@ export default function Home() {
       {error ? <div className="error">Ошибка: {error}</div> : null}
 
       <section className="controls">
-        <div className="controls-row main-controls">
-          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search symbol" />
+        <div className="controls-row">
+          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: BTC, TIA, PEPE..." />
           <div className="tabs">
             {MARKETS.map((item) => (
               <button key={item} className={`tab ${market === item ? 'active' : ''}`} onClick={() => setMarket(item)}>{item}</button>
@@ -153,14 +152,14 @@ export default function Home() {
           <button className={`zero-button ${zeroOnly ? 'active' : ''}`} onClick={() => setZeroOnly((v) => !v)}>0 fee</button>
         </div>
 
-        <div className="controls-row filter-controls">
+        <div className="controls-row compact-row">
           <label className="filter-box">
             <span>Size ≥</span>
-            <input value={minSize} onChange={(e) => setMinSize(e.target.value)} placeholder="500k / 1m" />
+            <input value={minSize} onChange={(e) => setMinSize(e.target.value)} inputMode="decimal" />
           </label>
           <label className="filter-box">
             <span>Leverage ≥</span>
-            <input value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} placeholder="100" />
+            <input value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} inputMode="numeric" />
           </label>
         </div>
       </section>
@@ -202,7 +201,7 @@ export default function Home() {
                   <td><span className="symbol" onClick={() => copySymbol(coin.symbol)}>{coin.symbol}</span></td>
                   <td><span className="market-badge">{coin.market}</span></td>
                   <td className="num size">{formatUsd(coin.maxSizeUsd)}</td>
-                  <td className="num">{formatNumber(coin.contracts)}</td>
+                  <td className="num contracts">{formatNumber(coin.contracts)}</td>
                   <td className="num">{formatNumber(coin.maxLeverage)}x</td>
                   <td><span className={`fee-badge ${coin.zeroFee ? 'fee-yes' : 'fee-no'}`}>{coin.zeroFee ? 'YES' : 'NO'}</span></td>
                   <td>{formatFee(coin.makerFee)} / {formatFee(coin.takerFee)}</td>
