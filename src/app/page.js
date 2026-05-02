@@ -144,23 +144,24 @@ export default function Home() {
       <section className="controls">
         <div className="controls-row">
           <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: BTC, TIA, PEPE..." />
+
           <div className="tabs">
             {MARKETS.map((item) => (
               <button key={item} className={`tab ${market === item ? 'active' : ''}`} onClick={() => setMarket(item)}>{item}</button>
             ))}
           </div>
-          <button className={`zero-button ${zeroOnly ? 'active' : ''}`} onClick={() => setZeroOnly((v) => !v)}>0 fee</button>
-        </div>
 
-        <div className="controls-row compact-row">
-          <label className="filter-box">
-            <span>Size ≥</span>
-            <input value={minSize} onChange={(e) => setMinSize(e.target.value)} inputMode="decimal" />
-          </label>
-          <label className="filter-box">
-            <span>Leverage ≥</span>
-            <input value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} inputMode="numeric" />
-          </label>
+          <div className="filters-pack">
+            <label className="filter-box">
+              <span>Size ≥</span>
+              <input value={minSize} onChange={(e) => setMinSize(e.target.value)} inputMode="decimal" />
+            </label>
+            <label className="filter-box leverage-box">
+              <span>Lev ≥</span>
+              <input value={minLeverage} onChange={(e) => setMinLeverage(e.target.value)} inputMode="numeric" />
+            </label>
+            <button className={`zero-button ${zeroOnly ? 'active' : ''}`} onClick={() => setZeroOnly((v) => !v)}>0 fee</button>
+          </div>
         </div>
       </section>
 
