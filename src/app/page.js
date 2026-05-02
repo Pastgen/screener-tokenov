@@ -184,7 +184,7 @@ export default function Home() {
               <th className="sortable num" onClick={() => sortBy('maxSizeUsd')}>Max size ${sortArrow('maxSizeUsd')}</th>
               <th className="sortable num" onClick={() => sortBy('contracts')}>Contracts{sortArrow('contracts')}</th>
               <th className="sortable num" onClick={() => sortBy('maxLeverage')}>Max leverage{sortArrow('maxLeverage')}</th>
-              <th className="sortable" onClick={() => sortBy('zeroFee')}>0 fee{sortArrow('zeroFee')}</th>
+              <th>0 fee</th>
               <th>Maker / Taker</th>
               <th className="sortable num" onClick={() => sortBy('price')}>Price{sortArrow('price')}</th>
             </tr>
