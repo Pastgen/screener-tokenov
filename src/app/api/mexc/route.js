@@ -1,67 +1,81 @@
 export const dynamic = "force-dynamic";
 
-function num(v, fallback = 0) {
-  const n = Number(v);
+function toNum(value, fallback = 0) {
+  const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normalizeFee(v) {
-  const n = num(v, 0);
-  // MEXC can return either percent-like 0 or decimal-like 0.0002.
-  // UI will multiply tiny decimal fees by 100.
-  return n;
+function getTickerPrice(t) {
+  return toNum(
+    t.lastPrice ?? t.last ?? t.fairPrice ?? t.indexPrice ?? t.bid1 ?? t.ask1,
+    0
+  );
+}
+
+function getOverallMaxContracts(coin) {
+  const maxVol = toNum(coin.maxVol, 0);
+  const riskBaseVol = toNum(coin.riskBaseVol, 0);
+  const riskIncrVol = toNum(coin.riskIncrVol, 0);
+  const riskLevelLimit = Math.max(1, toNum(coin.riskLevelLimit, 1));
+
+  // Overall position capacity estimate from public risk fields.
+  // This is NOT attached to maxLeverage. It is only the largest position size.
+  const riskUpper = riskBaseVol > 0
+    ? riskBaseVol + riskIncrVol * Math.max(0, riskLevelLimit - 1)
+    : 0;
+
+  return Math.max(maxVol, riskUpper);
 }
 
 export async function GET() {
   try {
-    const [contractsRes, tickersRes] = await Promise.all([
+    const [detailsRes, tickerRes] = await Promise.all([
       fetch("https://contract.mexc.com/api/v1/contract/detail", { cache: "no-store" }),
       fetch("https://contract.mexc.com/api/v1/contract/ticker", { cache: "no-store" })
     ]);
 
-    const contractsJson = await contractsRes.json();
-    const tickersJson = await tickersRes.json();
+    const detailsJson = await detailsRes.json();
+    const tickerJson = await tickerRes.json();
 
-    const tickers = Array.isArray(tickersJson?.data) ? tickersJson.data : [];
-    const prices = Object.fromEntries(
-      tickers.map((t) => [t.symbol, num(t.lastPrice ?? t.last_price ?? t.price, 0)])
-    );
+    const details = Array.isArray(detailsJson.data) ? detailsJson.data : [];
+    const tickers = Array.isArray(tickerJson.data) ? tickerJson.data : [];
 
-    const contracts = Array.isArray(contractsJson?.data) ? contractsJson.data : [];
+    const prices = new Map();
+    for (const t of tickers) {
+      if (t.symbol) prices.set(t.symbol, getTickerPrice(t));
+    }
 
-    const rows = contracts
-      .filter((c) => c && c.symbol && (c.state === 0 || c.state === "0" || c.state === undefined))
-      .map((c) => {
-        const price = prices[c.symbol] || num(c.lastPrice ?? c.indexPrice ?? c.fairPrice, 0);
-        const maxVol = num(c.maxVol, 0);
-        const contractSize = num(c.contractSize, 1);
-
-        // IMPORTANT:
-        // This is the overall public max size from MEXC contract detail.
-        // It is NOT attached to maxLeverage and does NOT claim the max size is available at max leverage.
-        const maxSizeUsd = maxVol * contractSize * price;
-
-        const makerFee = normalizeFee(c.makerFeeRate ?? c.makerFee ?? 0);
-        const takerFee = normalizeFee(c.takerFeeRate ?? c.takerFee ?? 0);
-        const isZeroFee = makerFee === 0 && takerFee === 0;
+    const rows = details
+      .filter((coin) => coin && coin.symbol && coin.symbol.includes("_"))
+      .map((coin) => {
+        const price = prices.get(coin.symbol) || 0;
+        const contractSize = toNum(coin.contractSize, 1);
+        const maxVol = toNum(coin.maxVol, 0);
+        const overallMaxContracts = getOverallMaxContracts(coin);
+        const maxSizeUsd = overallMaxContracts * contractSize * price;
+        const basicMaxUsd = maxVol * contractSize * price;
+        const makerFee = toNum(coin.makerFeeRate, 0);
+        const takerFee = toNum(coin.takerFeeRate, 0);
 
         return {
-          symbol: c.symbol,
+          symbol: coin.symbol,
           maxSizeUsd,
-          maxVol,
-          contractSize,
-          maxLeverage: num(c.maxLeverage, 0),
-          price,
+          basicMaxUsd,
+          maxLeverage: toNum(coin.maxLeverage, 0),
           makerFee,
           takerFee,
-          isZeroFee,
-          source: "contract/detail"
+          isZeroFee: makerFee === 0 && takerFee === 0,
+          price,
+          maxVol,
+          overallMaxContracts,
+          source: overallMaxContracts > maxVol ? "risk fields" : "maxVol"
         };
       })
+      .filter((r) => r.price > 0)
       .sort((a, b) => b.maxSizeUsd - a.maxSizeUsd);
 
-    return Response.json({ updatedAt: new Date().toISOString(), rows });
+    return Response.json({ ok: true, updatedAt: new Date().toISOString(), rows });
   } catch (error) {
-    return Response.json({ error: true, message: error?.message || "Failed to fetch MEXC data" }, { status: 500 });
+    return Response.json({ ok: false, error: String(error?.message || error) }, { status: 500 });
   }
 }

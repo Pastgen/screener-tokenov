@@ -1,3 +1,3 @@
 # MEXC Futures Scanner
 
-Simple scanner: max possible size, max leverage, 0 fee, maker/taker, price, symbol copy.
+Shows MEXC futures contracts with overall max position estimate, max leverage, fees, price, and symbol copy.

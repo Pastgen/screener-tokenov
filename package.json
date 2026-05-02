@@ -1,5 +1,5 @@
 {
-  "name": "mexc-futures-scanner-simple-fixed",
+  "name": "mexc-futures-scanner-max-overall",
   "version": "1.3.0",
   "private": true,
   "scripts": {
