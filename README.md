@@ -1,3 +1,3 @@
-# MEXC Futures Scanner
+# MEXC Pastgen Screener
 
-Personal scanner for MEXC futures contracts: max size, leverage, zero-fee, favorites, filters and sorting.
+Final core UI: max size, leverage, markets, zero-fee, favorites, copy symbol.

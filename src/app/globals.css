@@ -39,15 +39,19 @@ button { cursor: pointer; }
   justify-content: space-between;
   align-items: flex-start;
   gap: 24px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .eyebrow {
   color: #20e3b2;
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: .02em;
-  margin-bottom: 5px;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: .015em;
+  margin-bottom: 0;
+  text-transform: uppercase;
+}
+.brand-title {
+  text-shadow: 0 0 18px rgba(22, 214, 164, .12);
 }
 
 h1 {
@@ -123,7 +127,7 @@ h1 {
   padding: 0 13px;
   font-size: 14px;
 }
-.search::placeholder { color: #d7e5fb; opacity: 1; }
+.search::placeholder { color: #7f93b0; opacity: .58; }
 .search:focus,
 .filter-box:focus-within {
   border-color: #5a90d6;

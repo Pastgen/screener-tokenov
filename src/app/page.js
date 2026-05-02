@@ -92,12 +92,13 @@ export default function Home() {
     setSort((current) => {
       if (current.key !== key) return { key, dir: 'desc' };
       if (current.dir === 'desc') return { key, dir: 'asc' };
-      return { key: 'maxSizeUsd', dir: 'desc' };
+      if (current.dir === 'asc') return { key: null, dir: null };
+      return { key, dir: 'desc' };
     });
   }
 
   function sortArrow(key) {
-    if (sort.key !== key) return '';
+    if (sort.key !== key || !sort.dir) return '';
     return sort.dir === 'desc' ? ' ↓' : ' ↑';
   }
 
@@ -115,10 +116,12 @@ export default function Home() {
       .filter((coin) => !minUsd || coin.maxSizeUsd >= minUsd)
       .filter((coin) => !minLev || coin.maxLeverage >= minLev);
 
+    if (!sort.key || !sort.dir) return list;
+
     return [...list].sort((a, b) => {
       const av = a[sort.key];
       const bv = b[sort.key];
-      const res = typeof av === 'string' ? av.localeCompare(bv) : Number(av || 0) - Number(bv || 0);
+      const res = typeof av === 'string' ? String(av).localeCompare(String(bv)) : Number(av || 0) - Number(bv || 0);
       return sort.dir === 'asc' ? res : -res;
     });
   }, [coins, query, market, zeroOnly, favoritesOnly, minSize, minLeverage, favorites, sort]);
@@ -127,8 +130,7 @@ export default function Home() {
     <main className="page">
       <section className="topbar">
         <div>
-          <div className="eyebrow">MEXC Futures Scanner</div>
-          <h1>Лимиты позиции и 0 fee</h1>
+          <div className="eyebrow brand-title">MEXC Pastgen Screener</div>
           <div className="meta">
             <span>{coins.length} contracts</span>
             <span>{coins.filter((c) => c.zeroFee).length} zero-fee</span>
