@@ -143,7 +143,7 @@ export default function Home() {
 
       <section className="controls">
         <div className="controls-row">
-          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: BTC, TIA, PEPE..." />
+          <input className="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" />
 
           <div className="tabs">
             {MARKETS.map((item) => (
