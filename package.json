@@ -1,5 +1,5 @@
 {
-  "name": "mexc-futures-scanner-tiers-fixed",
+  "name": "mexc-futures-scanner-simple",
   "version": "1.2.0",
   "private": true,
   "scripts": {
