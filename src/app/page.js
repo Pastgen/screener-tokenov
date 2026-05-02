@@ -1,30 +1,37 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from "react";
+import "./style.css";
 
-function money(n) {
-  return '$' + Math.round(Number(n || 0)).toLocaleString('en-US');
-}
+const fmtUsd = (n) => {
+  if (!Number.isFinite(Number(n))) return "—";
+  return "$" + Math.round(Number(n)).toLocaleString("en-US");
+};
+const fmtNum = (n, max = 6) => Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: max });
+const fmtFee = (n) => (Number(n) * 100).toFixed(Number(n) === 0 ? 0 : 4).replace(/\.0+$/, "") + "%";
 
 export default function Home() {
   const [coins, setCoins] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [onlyZeroFee, setOnlyZeroFee] = useState(false);
-  const [sortDesc, setSortDesc] = useState(true);
-  const [opened, setOpened] = useState(null);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [zeroOnly, setZeroOnly] = useState(false);
+  const [sortKey, setSortKey] = useState("bestMaxPositionUsd");
+  const [sortDir, setSortDir] = useState("desc");
+  const [open, setOpen] = useState({});
+  const [updatedAt, setUpdatedAt] = useState(null);
 
   async function load() {
+    setLoading(true);
+    setError("");
     try {
-      setLoading(true);
-      setError('');
-      const res = await fetch('/api/mexc', { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || 'Failed to load');
-      setCoins(data);
+      const res = await fetch("/api/mexc", { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "API error");
+      setCoins(json.data || []);
+      setUpdatedAt(json.updatedAt);
     } catch (e) {
-      setError(e.message || 'Ошибка загрузки');
+      setError(e.message || "Ошибка загрузки");
     } finally {
       setLoading(false);
     }
@@ -34,87 +41,103 @@ export default function Home() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return [...coins]
-      .filter(c => !q || c.symbol.toLowerCase().includes(q))
-      .filter(c => !onlyZeroFee || c.isZeroFee)
-      .sort((a, b) => sortDesc ? b.maxPositionUsd - a.maxPositionUsd : a.maxPositionUsd - b.maxPositionUsd);
-  }, [coins, search, onlyZeroFee, sortDesc]);
+    const filtered = coins
+      .filter((c) => !q || c.symbol.toLowerCase().includes(q))
+      .filter((c) => !zeroOnly || c.isZeroFee);
+
+    filtered.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      const result = typeof av === "string" ? av.localeCompare(bv) : Number(av || 0) - Number(bv || 0);
+      return sortDir === "asc" ? result : -result;
+    });
+    return filtered;
+  }, [coins, search, zeroOnly, sortKey, sortDir]);
+
+  function sortBy(key) {
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("desc"); }
+  }
 
   return (
-    <main style={{ minHeight: '100vh', background: '#080b12', color: '#e8eefc', padding: 24, fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'end', marginBottom: 20 }}>
-          <div>
-            <div style={{ color: '#69e3ff', fontSize: 13, fontWeight: 700 }}>MEXC Futures Scanner</div>
-            <h1 style={{ margin: '6px 0 0', fontSize: 34 }}>Лимиты позиций и 0 fee</h1>
-            <p style={{ color: '#8c99ad', marginTop: 8 }}>Сортировка по максимальному доступному $-лимиту позиции. Данные обновляются с публичного MEXC Futures API.</p>
-          </div>
-          <button onClick={load} style={btn}>Обновить</button>
+    <main className="page">
+      <section className="hero">
+        <div>
+          <div className="eyebrow">MEXC Futures Scanner</div>
+          <h1>Risk tiers, лимиты позиций и 0 fee</h1>
+          <p>Главная колонка считает самый большой доступный лимит среди всех risk tiers, а не только лимит на максимальном плече.</p>
+          {updatedAt && <p className="muted">Обновлено: {new Date(updatedAt).toLocaleString()}</p>}
         </div>
+        <button className="refresh" onClick={load} disabled={loading}>{loading ? "Загрузка..." : "Обновить"}</button>
+      </section>
 
-        <section style={card}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск: BTC, PEPE, SOL..." style={input} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={onlyZeroFee} onChange={e => setOnlyZeroFee(e.target.checked)} /> Только 0 fee
-          </label>
-          <button onClick={() => setSortDesc(v => !v)} style={btn}>Max position {sortDesc ? '↓' : '↑'}</button>
-        </section>
+      <section className="panel filters">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Поиск: TIA, BTC, PEPE..." />
+        <label><input type="checkbox" checked={zeroOnly} onChange={(e) => setZeroOnly(e.target.checked)} /> Только 0 fee</label>
+        <button className="sort" onClick={() => sortBy("bestMaxPositionUsd")}>Max position {sortKey === "bestMaxPositionUsd" ? (sortDir === "desc" ? "↓" : "↑") : ""}</button>
+        <button className="sort ghost" onClick={() => sortBy("highestLeverage")}>Max leverage</button>
+      </section>
 
-        {loading && <div style={msg}>Загрузка...</div>}
-        {error && <div style={{...msg, color:'#ff6b6b'}}>Ошибка: {error}</div>}
+      {error && <div className="error">Ошибка: {error}</div>}
 
-        {!loading && !error && (
-          <section style={{ ...card, padding: 0, overflow: 'hidden' }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
-                <thead style={{ background: '#0d1320', color: '#9fb0c8' }}>
-                  <tr>
-                    <th style={th}>Symbol</th>
-                    <th style={th}>Max position $</th>
-                    <th style={th}>Max leverage</th>
-                    <th style={th}>0 fee</th>
-                    <th style={th}>Maker / Taker</th>
-                    <th style={th}>Price</th>
-                    <th style={th}>Risk levels</th>
+      <section className="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th onClick={() => sortBy("symbol")}>Symbol</th>
+              <th onClick={() => sortBy("bestMaxPositionUsd")}>Best max position $</th>
+              <th>Best tier</th>
+              <th>Highest lev. tier</th>
+              <th>0 fee</th>
+              <th>Maker / Taker</th>
+              <th>Price</th>
+              <th>Risk levels</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((c) => (
+              <>
+                <tr key={c.symbol}>
+                  <td className="symbol">{c.symbol}</td>
+                  <td className="money">{fmtUsd(c.bestMaxPositionUsd)}</td>
+                  <td>{c.bestTierLeverage}x / tier {c.bestTierLevel}</td>
+                  <td>{fmtUsd(c.highestLeveragePositionUsd)} @ {c.highestLeverage}x</td>
+                  <td><span className={c.isZeroFee ? "pill yes" : "pill no"}>{c.isZeroFee ? "YES" : "NO"}</span></td>
+                  <td>{fmtFee(c.makerFee)} / {fmtFee(c.takerFee)}</td>
+                  <td>{fmtNum(c.price)}</td>
+                  <td><button className="mini" onClick={() => setOpen((o) => ({ ...o, [c.symbol]: !o[c.symbol] }))}>{open[c.symbol] ? "Скрыть" : "Открыть"}</button></td>
+                </tr>
+                {open[c.symbol] && (
+                  <tr className="details" key={`${c.symbol}-details`}>
+                    <td colSpan="8">
+                      <div className="detailsBox">
+                        <div className="detailsTitle">Все risk tiers для {c.symbol}</div>
+                        <table className="tierTable">
+                          <thead><tr><th>Tier</th><th>Contracts range</th><th>Position $ range</th><th>Max leverage</th><th>IMR</th><th>MMR</th></tr></thead>
+                          <tbody>
+                            {c.tiers.map((t) => (
+                              <tr key={t.level}>
+                                <td>{t.level}</td>
+                                <td>{fmtNum(t.lowerVol, 0)} → {fmtNum(t.upperVol, 0)}</td>
+                                <td>{fmtUsd(t.minPositionUsd)} → <b>{fmtUsd(t.maxPositionUsd)}</b></td>
+                                <td>{t.maxLeverage}x</td>
+                                <td>{fmtFee(t.initialMarginRate)}</td>
+                                <td>{fmtFee(t.maintenanceMarginRate)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="hint">Формула: contracts × contractSize × current price. Для BY_VOLUME risk limits это должно совпадать с таблицей MEXC с небольшой погрешностью из-за движения цены.</p>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {rows.map(c => (
-                    <>
-                      <tr key={c.symbol} style={{ borderTop: '1px solid #1d2636' }}>
-                        <td style={td}><b>{c.symbol}</b></td>
-                        <td style={{...td, color:'#70f0b2', fontWeight:800}}>{money(c.maxPositionUsd)}</td>
-                        <td style={td}>{c.maxLeverage}x</td>
-                        <td style={td}><span style={pill(c.isZeroFee)}>{c.isZeroFee ? 'YES' : 'NO'}</span></td>
-                        <td style={td}>{c.makerFee} / {c.takerFee}</td>
-                        <td style={td}>{c.price}</td>
-                        <td style={td}><button style={smallBtn} onClick={() => setOpened(opened === c.symbol ? null : c.symbol)}>{opened === c.symbol ? 'Скрыть' : 'Открыть'}</button></td>
-                      </tr>
-                      {opened === c.symbol && (
-                        <tr>
-                          <td colSpan="7" style={{ padding: 14, background: '#0b101b', color: '#aebbd0' }}>
-                            <div><b>Сейчас:</b> публичный API MEXC отдаёт базовый maxVol/maxLeverage. Полные risk tiers по плечам добавим отдельным источником/парсером, если endpoint будет доступен.</div>
-                            <div style={{ marginTop: 8 }}>Формула: maxVol × contractSize × price = {c.maxVol} × {c.contractSize} × {c.price} = <b>{money(c.maxPositionUsd)}</b></div>
-                          </td>
-                        </tr>
-                      )}
-                    </>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-      </div>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+        {!loading && !rows.length && <div className="empty">Ничего не найдено</div>}
+      </section>
     </main>
   );
 }
-
-const card = { background: '#111722', border: '1px solid #202b3c', borderRadius: 16, padding: 16, marginBottom: 16, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' };
-const btn = { background: '#18c58b', color: '#06120d', border: 0, padding: '11px 16px', borderRadius: 12, fontWeight: 800, cursor: 'pointer' };
-const smallBtn = { background: '#192235', color: '#dce8ff', border: '1px solid #2a3850', padding: '7px 10px', borderRadius: 10, cursor: 'pointer' };
-const input = { background: '#080b12', color: '#e8eefc', border: '1px solid #2a3850', padding: '12px 14px', borderRadius: 12, minWidth: 280, outline: 'none' };
-const th = { textAlign: 'left', padding: 14, fontSize: 13 };
-const td = { padding: 14 };
-const msg = { background:'#111722', border:'1px solid #202b3c', borderRadius:16, padding:18 };
-const pill = ok => ({ background: ok ? '#123d2d' : '#3a1820', color: ok ? '#70f0b2' : '#ff8899', padding:'5px 10px', borderRadius:999, fontWeight:800, fontSize:12 });
