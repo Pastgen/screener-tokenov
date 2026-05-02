@@ -1,0 +1,4 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin:0; background:#070b12; color:#f4f7ff; font-family: Arial, Helvetica, sans-serif; }
+button,input { font: inherit; }
